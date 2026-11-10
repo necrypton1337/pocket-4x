@@ -1,0 +1,11 @@
+{
+  "name": "pocket-4x",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "sim": "node tools/sim.js",
+    "start": "node tools/serve.js"
+  }
+}

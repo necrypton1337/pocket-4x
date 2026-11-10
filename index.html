@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pocket 4X">
+  <title>Pocket 4X</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="map"></canvas>
+
+  <header id="top">
+    <div id="turn">Ход 1</div>
+    <button id="research" class="pill"></button>
+    <button id="mapBtn" class="icon" aria-label="Обзор карты"></button>
+    <button id="menuBtn" class="icon" aria-label="Меню"></button>
+  </header>
+
+  <div id="toasts"></div>
+
+  <footer id="bottom">
+    <div id="panel"></div>
+    <button id="next" class="primary big">Конец хода</button>
+  </footer>
+
+  <div id="modal" class="hidden">
+    <div class="sheet">
+      <div class="sheet-head"><h2 id="modalTitle"></h2><button id="modalClose" class="icon" aria-label="Закрыть"></button></div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/ui/main.js"></script>
+</body>
+</html>
