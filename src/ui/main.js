@@ -49,7 +49,7 @@ function loadSaved() {
 // ---------- Камера ----------
 
 function resize() {
-  dpr = Math.min(2, window.devicePixelRatio || 1);
+  dpr = Math.min(3, window.devicePixelRatio || 1);
   view.dpr = dpr;
   view.width = window.innerWidth;
   view.height = window.innerHeight;

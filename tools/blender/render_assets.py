@@ -9,7 +9,7 @@ OUT = ARGS[0] if ARGS else 'assets'
 ONLY = ARGS[1] if len(ARGS) > 1 else ''
 TILT = math.radians(40)
 K = math.cos(TILT)
-PX = 96  # пикселей на единицу мира (радиус гекса = 1)
+PX = 192  # пикселей на единицу мира (радиус гекса = 1)
 os.makedirs(OUT, exist_ok=True)
 MANIFEST = {}
 man_path = os.path.join(OUT, 'manifest.json')

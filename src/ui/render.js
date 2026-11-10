@@ -22,7 +22,7 @@ export async function loadSprites(base = 'assets/') {
       const img = new Image();
       img.onload = () => { sprites.set(name, { ...m, img }); resolve(); };
       img.onerror = resolve;
-      img.src = base + name + '.png';
+      img.src = base + name + '.' + (man.ext || 'png');
     })));
     spritesReady = true;
   } catch {
@@ -239,6 +239,8 @@ export function render(ctx, view, s, me, ui) {
   const { width: W, height: H, cam } = view;
   const size = BASE_SIZE * cam.zoom;
   const now = performance.now();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = '#0c1017';
   ctx.fillRect(0, 0, W, H);
   const explored = s.players[me].explored;

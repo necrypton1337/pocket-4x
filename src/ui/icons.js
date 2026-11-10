@@ -23,6 +23,8 @@ export const I = {
   up: svg('<path d="M12 4l7 8h-4v8H9v-8H5z" fill="currentColor"/>', 'i-up'),
 };
 
+export const EXT = { v: 'webp' };
+
 export function thumb(name, cls = '') {
-  return `<img class="thumb ${cls}" src="assets/${name}.png" alt="" loading="lazy">`;
+  return `<img class="thumb ${cls}" src="assets/${name}.${EXT.v}" alt="" loading="lazy">`;
 }
