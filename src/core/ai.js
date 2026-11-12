@@ -8,7 +8,7 @@ import {
   availableTechs, setResearch, setProduction, productionOptions, foundCity, canFoundCity, findPath, orderMove,
   enterKind, availableImprovements, startImprovement, canAttack, attack, combatPreview, fortify, atWar, majors, minors,
   resolveBuilding, purchase, canPurchase, purchaseCost, upgradeUnit, canUpgrade, upgradeCost, chooseEmperor,
-  giftGold, minorCity, spawnUnit, idx, playerIncome,
+  giftGold, minorCity, spawnUnit, idx, playerIncome, connectedCities,
 } from './game.js';
 
 const BUILD_ORDER = ['granary', 'library', 'market', 'workshop', 'walls', 'barracks', 'beacon', 'forge', 'university', 'aqueduct', 'castle'];
@@ -246,9 +246,53 @@ function runSettler(s, pid, u) {
   }
 }
 
+// Следующая клетка дороги между столицей и ещё не связанным городом
+function roadTarget(s, pid) {
+  const cap = playerCities(s, pid).find((c) => c.capital);
+  if (!cap) return null;
+  const conn = connectedCities(s, pid);
+  const lonely = playerCities(s, pid).filter((c) => !c.capital && !conn.has(c.id))
+    .sort((a, b) => distance(a.x, a.y, cap.x, cap.y) - distance(b.x, b.y, cap.x, cap.y));
+  for (const c of lonely) {
+    if (distance(c.x, c.y, cap.x, cap.y) > 12) continue;
+    // Поиск в ширину по суше, где можно строить дорогу: дорожные клетки бесплатны
+    const W = s.width, start = idx(s, c.x, c.y), goal = idx(s, cap.x, cap.y);
+    const cost = new Map([[start, 0]]), from = new Map();
+    const queue = [[0, start]];
+    while (queue.length) {
+      queue.sort((a, b) => a[0] - b[0]);
+      const [d, cur] = queue.shift();
+      if (cur === goal) break;
+      for (const [nx, ny] of neighbors(W, s.height, cur % W, Math.floor(cur / W))) {
+        const t = tileAt(s, nx, ny);
+        if (TERRAIN[t.t].move === Infinity || (t.owner !== -1 && t.owner !== pid)) continue;
+        const ni = idx(s, nx, ny), nd = d + (t.road ? 0.2 : 1);
+        if (!cost.has(ni) || nd < cost.get(ni)) { cost.set(ni, nd); from.set(ni, cur); queue.push([nd, ni]); }
+      }
+    }
+    if (!from.has(goal)) continue;
+    for (let k = goal; k !== start; k = from.get(k)) {
+      if (!s.tiles[k].road) return [k % W, Math.floor(k / W)];
+    }
+  }
+  return null;
+}
+
 export function runWorker(s, pid, u) {
   if (u.work) return;
-  const here = availableImprovements(s, u);
+  // Каждый второй инженер в первую очередь соединяет города дорогами
+  if (u.id % 2 === 0 && s.turn > 25) {
+    const rt = roadTarget(s, pid);
+    if (rt) {
+      if (u.x === rt[0] && u.y === rt[1]) { startImprovement(s, u.id, 'road'); return; }
+      if (enterKind(s, u, rt[0], rt[1]) === 'move' && findPath(s, u, rt[0], rt[1])) {
+        approach(s, u, rt[0], rt[1], 0);
+        if (s.units[u.id] && u.x === rt[0] && u.y === rt[1] && u.moves > 0) startImprovement(s, u.id, 'road');
+        return;
+      }
+    }
+  }
+  const here = availableImprovements(s, u).filter((k) => k !== 'road');
   if (here.length && !threatNear(s, pid, u.x, u.y, 2)) {
     const pref = here.includes('mine') ? 'mine' : here[0];
     startImprovement(s, u.id, pref);
@@ -265,10 +309,18 @@ export function runWorker(s, pid, u) {
     const d = distance(u.x, u.y, x, y) - (t.res ? 2 : 0);
     if (d < bestD) { bestD = d; best = [x, y]; }
   });
-  if (!best) return;
+  if (!best) {
+    // Всё вокруг улучшено — строим дороги
+    const rt = roadTarget(s, pid);
+    if (rt && enterKind(s, u, rt[0], rt[1]) === 'move') {
+      if (u.x === rt[0] && u.y === rt[1]) startImprovement(s, u.id, 'road');
+      else approach(s, u, rt[0], rt[1], 0);
+    }
+    return;
+  }
   approach(s, u, best[0], best[1], 0);
   if (s.units[u.id] && u.moves > 0) {
-    const imps = availableImprovements(s, u);
+    const imps = availableImprovements(s, u).filter((k) => k !== 'road');
     if (imps.length) startImprovement(s, u.id, imps.includes('mine') ? 'mine' : imps[0]);
   }
 }

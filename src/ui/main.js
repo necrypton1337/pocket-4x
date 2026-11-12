@@ -2,7 +2,7 @@
 import * as G from '../core/game.js';
 import { endTurn, runAutoWorkers } from '../core/turn.js';
 import { serialize, deserialize } from '../core/save.js';
-import { UNITS, BUILDINGS, TECHS, IMPROVEMENTS, TERRAIN, DIFFICULTY, RESOURCES, FACTIONS, PLAYABLE_FACTIONS, EMPEROR_TRAITS, MINOR_TYPES, RULES } from '../core/data.js';
+import { UNITS, BUILDINGS, TECHS, IMPROVEMENTS, TERRAIN, DIFFICULTY, RESOURCES, FACTIONS, PLAYABLE_FACTIONS, EMPEROR_TRAITS, MINOR_TYPES, RULES, ROAD } from '../core/data.js';
 import { distance, tilesInRadius } from '../core/hex.js';
 import { render, renderOverview, tileCenter, pixelToTile, BASE_SIZE, loadSprites, KY } from './render.js';
 import { suggestSites } from '../core/ai.js';
@@ -473,6 +473,10 @@ const plural = (n, one, few, many) => {
 };
 const turnsText = (n) => `${n} ${plural(n, 'ход', 'хода', 'ходов')}`;
 
+const impName = (k) => (k === 'road' ? ROAD.name : IMPROVEMENTS[k].name);
+const impTurns = (k) => (k === 'road' ? ROAD.turns : IMPROVEMENTS[k].turns);
+const fmtMoves = (m) => (Math.abs(m - Math.round(m)) < 0.01 ? String(Math.round(m)) : m.toFixed(1).replace('.', ','));
+
 function teamName(pid) {
   const p = s.players[pid];
   return p.kind === 'minor' ? 'minor' : p.kind === 'fauna' ? 'fauna' : p.faction || 'colonists';
@@ -504,7 +508,7 @@ function unitPanel(u) {
   const owner = s.players[u.owner];
   const power = G.isRangedType(u.type) ? `<span>${I.rng} ${d.rng} · дальность ${d.range}</span><span>${I.def} ${d.str}</span>` : d.str ? `<span>${I.str} ${d.str}</span>` : '';
   let html = `<div class="head">${unitThumb(u)}<div><div class="hn">${d.name}${u.vet ? ' <span class="tag">ветеран</span>' : ''}</div><div class="ho">${swatch(u.owner)}${owner.name}</div></div></div>
-    <div class="stats"><span>${I.hp} ${u.hp}/100</span>${u.owner === me ? `<span>${I.moves} ${u.moves}/${d.moves}</span>` : ''}${power}</div>`;
+    <div class="stats"><span>${I.hp} ${u.hp}/100</span>${u.owner === me ? `<span>${I.moves} ${fmtMoves(u.moves)}/${d.moves}</span>` : ''}${power}</div>`;
   if (u.owner !== me) {
     const peace = !G.atWar(s, me, u.owner) ? ' Вы не воюете с ними.' : '';
     return html + `<div class="hint">${d.desc}${peace}</div>`;
@@ -513,7 +517,7 @@ function unitPanel(u) {
   const acts = [];
   let hint = '';
   if (u.work) {
-    hint = `Строит: ${IMPROVEMENTS[u.work.imp].name}, осталось ${turnsText(u.work.left)}.`;
+    hint = `Строит: ${impName(u.work.imp)}, осталось ${turnsText(u.work.left)}.`;
     acts.push(`<button data-act="wake">Отменить стройку</button>`);
   } else if (u.type === 'settler') {
     const ok = G.canFoundCity(s, u);
@@ -522,7 +526,7 @@ function unitPanel(u) {
     else hint = 'Можно основать здесь. ⭐ на карте — хорошие места поблизости.';
   } else if (u.type === 'worker') {
     const imps = G.availableImprovements(s, u);
-    for (const k of imps) acts.push(`<button class="primary" data-act="imp:${k}">${IMPROVEMENTS[k].name} · ${turnsText(IMPROVEMENTS[k].turns)}</button>`);
+    for (const k of imps) acts.push(`<button class="${k === 'road' ? '' : 'primary'}" data-act="imp:${k}">${impName(k)} · ${turnsText(impTurns(k))}</button>`);
     if (u.auto) {
       hint = 'Работает сам: выбирает клетки и строит улучшения.';
       acts.length = 0;
@@ -554,9 +558,12 @@ function unitPanel(u) {
 function pathTurns(u, path) {
   const max = UNITS[u.type].moves;
   let moves = u.moves > 0 ? u.moves : max, turns = u.moves > 0 ? 1 : 2;
+  let px = u.x, py = u.y;
   for (const [x, y] of path) {
-    if (moves <= 0) { turns++; moves = max; }
-    moves -= UNITS[u.type].flying ? 1 : TERRAIN[G.tileAt(s, x, y).t].move;
+    if (moves <= 0.001) { turns++; moves = max; }
+    const road = G.tileAt(s, px, py).road && G.tileAt(s, x, y).road;
+    moves -= UNITS[u.type].flying ? 1 : road ? ROAD.cost : TERRAIN[G.tileAt(s, x, y).t].move;
+    px = x; py = y;
   }
   return turns;
 }
@@ -573,7 +580,7 @@ function moveHtml(u, x, y) {
   const owner = t.owner >= 0 ? ` · ${s.players[t.owner].name}` : '';
   const city = G.cityAt(s, x, y);
   const there = myUnitsAt(x, y).length || (city && city.owner === me);
-  return `<div class="stats"><span>Цель: <b style="color:var(--text)">${city ? city.name : tt.name}${t.imp ? ` + ${IMPROVEMENTS[t.imp].name}` : ''}</b>${owner}</span></div>
+  return `<div class="stats"><span>Цель: <b style="color:var(--text)">${city ? city.name : tt.name}${t.imp ? ` + ${IMPROVEMENTS[t.imp].name}` : ''}${t.road && !city ? ' + дорога' : ''}</b>${owner}</span></div>
     <div class="stats">${bits.map((b) => `<span>${b}</span>`).join('')}<span>${when}</span></div>
     ${featureHint(t)}
     <div class="actions"><button class="primary" data-act="go">Идти сюда</button>
@@ -620,10 +627,13 @@ function cityPanel(c) {
     const ok = G.canPurchase(s, c);
     acts.push(`<button data-act="buy" ${ok === true ? '' : 'disabled'}>Купить · ${G.purchaseCost(s, c)} ${I.gold}</button>`);
   }
+  const conn = c.capital ? '' : G.connectedCities(s, me).has(c.id)
+    ? `<div class="hint">Связан дорогой со столицей: +${G.roadBonus(c)} ${I.gold}</div>`
+    : `<div class="hint">Не связан дорогой со столицей. Проложите дорогу инженерами — город даст +${G.roadBonus(c)} ${I.gold}.</div>`;
   const unrest = c.unrest > 0 ? `<div class="hint" style="color:var(--danger)">Беспорядки после захвата: город не работает ещё ${turnsText(c.unrest)}.</div>` : '';
   const blds = c.buildings.map((b) => BUILDINGS[b].name).join(', ');
   return head + `<div class="stats"><span>${I.food} ${y.surplus >= 0 ? '+' : ''}${y.surplus} <span class="muted">${grow}</span></span><span>${I.prod} ${y.prod}</span><span>${I.sci} ${y.sci}</span><span>${I.gold} ${y.gold}</span><span>${I.hp} ${c.hp}</span></div>
-    ${unrest}${build}${blds ? `<div class="hint">Здания: ${blds}</div>` : ''}
+    ${unrest}${build}${blds ? `<div class="hint">Здания: ${blds}</div>` : ''}${conn}
     <div class="actions">${acts.join('')}</div>`;
 }
 
@@ -675,7 +685,7 @@ function tilePanel(x, y) {
   if (tt.move === Infinity && t.t !== 'water') bits.push('Непроходимо');
   if (t.t === 'water') bits.push('Только для летающих');
   const owner = t.owner >= 0 ? ` · ${s.players[t.owner].name}` : '';
-  return `<div class="head">${tt.name}${t.imp ? ` + ${IMPROVEMENTS[t.imp].name}` : ''}<span class="muted" style="font-weight:400">${owner}</span></div>
+  return `<div class="head">${tt.name}${t.imp ? ` + ${IMPROVEMENTS[t.imp].name}` : ''}${t.road ? ' + дорога' : ''}<span class="muted" style="font-weight:400">${owner}</span></div>
     <div class="stats">${bits.map((b) => `<span>${b}</span>`).join('')}</div>${featureHint(t)}`;
 }
 
@@ -1013,6 +1023,7 @@ function openHelp() {
     <p><b>Кнопка внизу</b> всегда подсказывает следующий шаг: выбрать исследование, что строить в городе, куда идти юниту. Когда всё сделано — «Конец хода».</p>
     <p><b>Юниты:</b> нажмите на юнита, затем на клетку и подтвердите «Идти сюда». Красная рамка — можно атаковать, перед атакой покажут ожидаемый урон.</p>
     <p><b>Города</b> растут от еды, строят за счёт производства, дают науку и деньги. Новый город основывают колонисты, не ближе 3 клеток к другому.</p>
+    <p><b>Дороги:</b> инженеры прокладывают их за 2 хода. По дороге юниты идут втрое быстрее, а город, связанный дорогой со столицей, приносит деньги.</p>
     <p><b>Деньги:</b> армия сверх бесплатной требует содержания. За деньги можно сразу купить то, что строит город, улучшить старый юнит и делать подарки поселениям.</p>
     <p><b>Нейтральные поселения:</b> дарите им деньги, чтобы стать союзником и получать бонус. Нападать на них можно, только объявив войну.</p>
     <p><b>Планета:</b> руины дают находки, гнёзда порождают фауну — уничтожьте их бойцом. Особые ресурсы (кристаллы, гейзеры, плодородная почва, металлы, планктон) усиливают клетки.</p>

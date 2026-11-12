@@ -21,6 +21,9 @@ export const RESOURCES = {
   plankton: { name: 'Планктон',       icon: '🦐', on: ['water'],                      food: 2, prod: 0, gold: 1, sci: 0 },
 };
 
+// Дорога: строят инженеры за 2 хода на своей или ничьей земле. По дороге ход стоит треть очка.
+export const ROAD = { name: 'Дорога', turns: 2, cost: 1 / 3 };
+
 export const IMPROVEMENTS = {
   farm:   { name: 'Ферма',     icon: '🌾', turns: 4, on: ['grass', 'plains', 'desert', 'tundra'], food: 1, prod: 0, tech: null },
   mine:   { name: 'Шахта',     icon: '⛏️', turns: 5, on: ['hills'],  food: 0, prod: 2, tech: 'mining' },

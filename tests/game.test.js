@@ -245,7 +245,7 @@ test('рабочий строит ферму, и клетка даёт боль�
   cityFor(s, 0, 3, 3);
   const wk = unit(s, 'worker', 0, 4, 3);
   const before = G.tileYield(s, 4, 3, 0).food;
-  assert.deepEqual(G.availableImprovements(s, wk), ['farm']);
+  assert.deepEqual(G.availableImprovements(s, wk), ['farm', 'road']);
   assert.ok(G.startImprovement(s, wk.id, 'farm'));
   for (let i = 0; i < 4; i++) { G.finishPlayerTurn(s, 0); G.beginPlayerTurn(s, 0); }
   assert.equal(G.tileAt(s, 4, 3).imp, 'farm');

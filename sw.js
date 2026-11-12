@@ -1,6 +1,6 @@
 // Офлайн: при первом открытии всё кладём в кэш, дальше играем без сети.
 // При изменении файлов игры поднимайте VERSION, чтобы телефон забрал новую версию.
-const VERSION = 'pocket4x-v10';
+const VERSION = 'pocket4x-v11';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'src/ui/main.js', 'src/ui/render.js', 'src/ui/icons.js',

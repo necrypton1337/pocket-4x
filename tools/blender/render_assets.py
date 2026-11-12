@@ -566,7 +566,7 @@ def render_walls(style):
 TEAM = {
     'empire':     (srgb('#f1f4f9'), srgb('#2557d6'), srgb('#d4af37')),
     'scientists': (srgb('#dfe7e6'), srgb('#1fb3a5'), srgb('#9ff6ec')),
-    'believers':  (srgb('#3b3a40'), srgb('#8c1c3a'), srgb('#e9d6b0')),
+    'believers':  (srgb('#8a8490'), srgb('#9c1f42'), srgb('#f0dcb4')),
     'colonists':  (srgb('#c9b58b'), srgb('#e08a20'), srgb('#5b6470')),
     'minor':      (srgb('#8a9470'), srgb('#c7b37a'), srgb('#5a4630')),
 }
@@ -765,7 +765,7 @@ def render_unit(utype, team):
 # ---------------- запуск ----------------
 
 def want(name):
-    return not ONLY or name.startswith(ONLY)
+    return not ONLY or ONLY in name
 
 
 jobs = []

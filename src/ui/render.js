@@ -297,6 +297,27 @@ export function render(ctx, view, s, me, ui) {
     ctx.fill();
   }
 
+  // Дороги
+  const isRoad = (x, y) => x >= 0 && y >= 0 && x < s.width && y < s.height && s.tiles[y * s.width + x].road && explored[y * s.width + x];
+  const roadPass = (w, color) => {
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round';
+    for (const [x, y, sx, sy] of visibleTiles) {
+      if (!isRoad(x, y)) continue;
+      const dirs = neighborDirs(x, y);
+      let any = false;
+      dirs.forEach(([nx, ny], d) => {
+        if (!isRoad(nx, ny)) return;
+        any = true;
+        if (d !== 0 && d !== 4 && d !== 5) return; // каждую связь рисуем один раз
+        const [ex, ey] = toScreen(nx, ny);
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+      });
+      if (!any) { ellipse(ctx, sx, sy, w * 0.8, w * 0.8 * KY); ctx.fill(); }
+    }
+  };
+  roadPass(Math.max(3, size * 0.15), 'rgba(52,40,26,0.85)');
+  roadPass(Math.max(1.5, size * 0.08), 'rgba(176,152,110,0.95)');
+
   // 2. Территория и подсветки (лежат на земле)
   for (const [x, y, sx, sy] of visibleTiles) {
     const i = y * s.width + x;
@@ -392,7 +413,7 @@ export function render(ctx, view, s, me, ui) {
     if (pn && !(city && tile.t !== 'mountain')) drawSprite(ctx, pick(pn, fog), sx, sy, size);
     if (tile.imp && !city) {
       const n = { farm: 'imp_farm', mine: 'imp_mine', lumber: 'imp_lumber' }[tile.imp];
-      drawSprite(ctx, pick(n, fog), sx - size * (tile.imp === 'farm' ? 0 : 0.35), sy + size * 0.18 * KY, size, tile.imp === 'farm' ? 1.3 : 0.8);
+      drawSprite(ctx, pick(n, fog), sx - size * (tile.imp === 'farm' ? 0.05 : 0.35), sy + size * 0.12 * KY, size, tile.imp === 'farm' ? 0.95 : 0.8);
     }
     if (tile.feature) drawSprite(ctx, pick(`prop_${tile.feature}_0`, fog), sx, sy, size, 0.9);
     if (tile.res) drawSprite(ctx, pick(`res_${tile.res}`, fog), sx + size * 0.42, sy + size * 0.3 * KY, size, 0.85);

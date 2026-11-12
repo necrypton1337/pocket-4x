@@ -266,3 +266,35 @@ test('новая партия: есть нейтральные поселени�
   assert.ok(Object.keys(s.nests).length > 0);
   assert.ok(s.tiles.filter((t) => t.res).length > 10);
 });
+
+test('дороги: инженер строит, по дороге юнит идёт втрое дальше', () => {
+  const s = makeState(12, 6);
+  const wk = unit(s, 'worker', 0, 2, 2);
+  assert.ok(G.availableImprovements(s, wk).includes('road'), 'дорогу можно на ничьей земле');
+  for (let x = 2; x <= 9; x++) s.tiles[G.idx(s, x, 2)].road = true;
+  const w = unit(s, 'warrior', 0, 2, 3);
+  G.orderMove(s, w.id, 2, 2);
+  w.moves = 2;
+  G.orderMove(s, w.id, 8, 2);
+  assert.deepEqual([w.x, w.y], [8, 2], '6 клеток по дороге за 2 очка');
+});
+
+test('дороги: город, связанный со столицей, приносит больше денег', () => {
+  const s = makeState(14, 6);
+  const cap = cityFor(s, 0, 2, 2);
+  const c2 = cityFor(s, 0, 7, 2);
+  const before = G.cityYield(s, c2).gold;
+  assert.ok(!G.connectedCities(s, 0).has(c2.id));
+  for (let x = 3; x <= 6; x++) s.tiles[G.idx(s, x, 2)].road = true;
+  s.roadVer = (s.roadVer || 0) + 1;
+  assert.ok(G.connectedCities(s, 0).has(c2.id));
+  assert.equal(G.cityYield(s, c2).gold, before + G.roadBonus(c2));
+  assert.ok(cap.capital);
+});
+
+test('дороги: ИИ сам соединяет города дорогами', async () => {
+  const { endTurn } = await import('../src/core/turn.js');
+  const s = G.createGame({ seed: 21, opponents: 1, allAI: true });
+  for (let i = 0; i < 110 && !s.over; i++) endTurn(s);
+  assert.ok(s.tiles.filter((t) => t.road).length > G.cityList(s).length + 3, 'построены дороги');
+});

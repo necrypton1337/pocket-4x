@@ -1,7 +1,7 @@
 // Правила игры. Всё состояние — простой объект, который целиком сохраняется в JSON.
 import {
   TERRAIN, IMPROVEMENTS, UNITS, BUILDINGS, TECHS, FACTIONS, PLAYABLE_FACTIONS, RESOURCES, EMPEROR_TRAITS,
-  MINOR_TYPES, FAUNA_STYLE, DIFFICULTY, MAP_SIZES, RULES,
+  MINOR_TYPES, FAUNA_STYLE, DIFFICULTY, MAP_SIZES, RULES, ROAD,
 } from './data.js';
 import { neighbors, distance, tilesInRadius } from './hex.js';
 import { rand, randInt, shuffle } from './rng.js';
@@ -320,6 +320,35 @@ export const allyOf = (s, minorPid) => s.players[minorPid].ally ?? null;
 export function allyCount(s, pid, type) {
   return minors(s).filter((m) => m.alive && m.ally === pid && m.minorType === type).length;
 }
+// Города, связанные дорогой со столицей (кэш до следующей стройки дороги или смены владельца города)
+const connCache = new WeakMap();
+export function connectedCities(s, pid) {
+  let entry = connCache.get(s);
+  const ver = `${s.roadVer || 0}|${s.turn}`;
+  if (!entry || entry.ver !== ver) { entry = { ver, byPlayer: new Map() }; connCache.set(s, entry); }
+  if (entry.byPlayer.has(pid)) return entry.byPlayer.get(pid);
+  const set = new Set();
+  const cap = playerCities(s, pid).find((c) => c.capital);
+  if (cap) {
+    const seen = new Set([idx(s, cap.x, cap.y)]);
+    const stack = [[cap.x, cap.y]];
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      for (const [nx, ny] of neighbors(s.width, s.height, x, y)) {
+        const i = idx(s, nx, ny);
+        const t = s.tiles[i];
+        if (seen.has(i) || !t.road || (t.owner !== -1 && t.owner !== pid && atWar(s, pid, t.owner))) continue;
+        seen.add(i);
+        stack.push([nx, ny]);
+      }
+    }
+    for (const c of playerCities(s, pid)) if (!c.capital && seen.has(idx(s, c.x, c.y))) set.add(c.id);
+  }
+  entry.byPlayer.set(pid, set);
+  return set;
+}
+export const roadBonus = (c) => 1 + Math.floor(c.pop / 3);
+
 const emperorTrait = (s, pid) => (s.players[pid].emperor ? s.players[pid].emperor.trait : null);
 
 export function cityYield(s, c) {
@@ -336,6 +365,7 @@ export function cityYield(s, c) {
   if (cityHas(c, 'workshop')) prod += 2;
   if (cityHas(c, 'forge')) prod += 3;
   if (c.capital) food += 3 * allyCount(s, c.owner, 'farmers');
+  if (!c.capital && p.kind === 'major' && connectedCities(s, c.owner).has(c.id)) gold += roadBonus(c);
   if (cityHas(c, 'market')) gold = (gold + 2) * 1.25;
   if (p.faction === 'believers') gold += Math.floor(c.pop / 2) + 1;
   let sciMult = 1;
@@ -386,6 +416,8 @@ function createCity(s, owner, x, y) {
     prodStore: 0, build: null, buildings: [], hp: RULES.cityBaseHp, capital: first, founded: s.turn, shot: false, unrest: 0 };
   s.cities[id] = c;
   s.players[owner].everHadCity = true;
+  tileAt(s, x, y).road = true;
+  s.roadVer = (s.roadVer || 0) + 1;
   return c;
 }
 
@@ -651,7 +683,13 @@ export function worldTick(s) {
 // ---------- Движение ----------
 
 const passableFor = (u, t) => !!UNITS[u.type].flying || TERRAIN[t].move !== Infinity;
-const moveCostFor = (s, u, x, y) => (UNITS[u.type].flying ? 1 : TERRAIN[tileAt(s, x, y).t].move);
+// По дороге (с дорожной клетки на дорожную) ход стоит треть очка.
+function moveCostFor(s, u, x, y, fx = null, fy = null) {
+  if (UNITS[u.type].flying) return 1;
+  if (fx != null && tileAt(s, fx, fy).road && tileAt(s, x, y).road) return ROAD.cost;
+  return TERRAIN[tileAt(s, x, y).t].move;
+}
+const roundMoves = (m) => Math.max(0, Math.round(m * 1000) / 1000);
 
 // Что произойдёт, если юнит войдёт на клетку: 'move' | 'capture' | 'attack' | null
 export function enterKind(s, u, x, y) {
@@ -737,14 +775,14 @@ export function findPath(s, u, tx, ty, { maxCost = Infinity } = {}) {
     for (const [nx, ny] of neighbors(s.width, s.height, cx, cy)) {
       const ni = idx(s, nx, ny);
       if (ni !== goal && !passable(nx, ny)) continue;
-      const cost = Math.min(moveCostFor(s, u, nx, ny), UNITS[u.type].moves);
+      const cost = Math.min(moveCostFor(s, u, nx, ny, cx, cy), UNITS[u.type].moves);
       if (!isFinite(cost)) continue;
       const ng = cg + cost;
       if (ng > maxCost) continue;
       if (!g.has(ni) || ng < g.get(ni)) {
         g.set(ni, ng);
         from.set(ni, cur);
-        heap.push(ni, ng + distance(nx, ny, tx, ty));
+        heap.push(ni, ng + distance(nx, ny, tx, ty) * ROAD.cost);
       }
     }
   }
@@ -775,7 +813,7 @@ export function reachable(s, u) {
         if (melee && !out.has(ni) && canAttackFrom(s, u, nx, ny)) out.set(ni, { kind, rem: 0, from: cur });
         continue;
       }
-      const nr = Math.max(0, rem - moveCostFor(s, u, nx, ny));
+      const nr = roundMoves(rem - moveCostFor(s, u, nx, ny, cx, cy));
       if (!best.has(ni) || nr > best.get(ni)) {
         best.set(ni, nr);
         out.set(ni, { kind, rem: nr, from: cur });
@@ -790,7 +828,7 @@ function stepUnit(s, u, x, y) {
   const kind = enterKind(s, u, x, y);
   if (kind !== 'move' && kind !== 'capture') return false;
   if (distance(u.x, u.y, x, y) !== 1 || u.moves <= 0) return false;
-  u.moves = Math.max(0, u.moves - moveCostFor(s, u, x, y));
+  u.moves = roundMoves(u.moves - moveCostFor(s, u, x, y, u.x, u.y));
   fx(s, { t: 'move', id: u.id, type: u.type, owner: u.owner, hp: u.hp, fx: u.x, fy: u.y, x, y });
   u.x = x; u.y = y;
   u.fortified = false;
@@ -920,17 +958,19 @@ export function disbandUnit(s, uid) {
 export function availableImprovements(s, u) {
   if (!u || u.type !== 'worker') return [];
   const t = tileAt(s, u.x, u.y);
-  if (t.owner !== u.owner || cityAt(s, u.x, u.y)) return [];
-  return Object.keys(IMPROVEMENTS).filter((k) => {
+  if (cityAt(s, u.x, u.y) || TERRAIN[t.t].move === Infinity) return [];
+  const out = t.owner !== u.owner ? [] : Object.keys(IMPROVEMENTS).filter((k) => {
     const imp = IMPROVEMENTS[k];
     return imp.on.includes(t.t) && t.imp !== k && hasTech(s, u.owner, imp.tech);
   });
+  if (!t.road && (t.owner === u.owner || t.owner === -1)) out.push('road');
+  return out;
 }
 
 export function startImprovement(s, uid, imp) {
   const u = s.units[uid];
   if (!u || u.moves <= 0 || !availableImprovements(s, u).includes(imp)) return false;
-  u.work = { imp, left: IMPROVEMENTS[imp].turns };
+  u.work = { imp, left: imp === 'road' ? ROAD.turns : IMPROVEMENTS[imp].turns };
   u.moves = 0;
   u.goto = null;
   return true;
@@ -1142,6 +1182,7 @@ function captureCity(s, c, newOwner) {
     return d.replaces ? [resolveBuilding(s, newOwner, d.replaces)] : [];
   });
   c.unrest = commandaturaNear(s, newOwner, c) ? 0 : RULES.unrestTurns;
+  s.roadVer = (s.roadVer || 0) + 1;
   s.tiles.forEach((t) => { if (t.city === c.id) t.owner = newOwner; });
   event(s, `${s.players[newOwner].name} захватили город ${c.name}!` + (c.unrest ? ` Беспорядки ${c.unrest} хода.` : ''), [old, newOwner], c.x, c.y);
   if (wasCapital) {
@@ -1266,9 +1307,15 @@ export function finishPlayerTurn(s, pid) {
     u.work.left--;
     if (u.work.left <= 0) {
       const t = tileAt(s, u.x, u.y);
-      t.imp = u.work.imp;
+      if (u.work.imp === 'road') {
+        t.road = true;
+        s.roadVer = (s.roadVer || 0) + 1;
+        event(s, 'Построена дорога', pid, u.x, u.y);
+      } else {
+        t.imp = u.work.imp;
+        event(s, `Построено: ${IMPROVEMENTS[t.imp].name}`, pid, u.x, u.y);
+      }
       u.work = null;
-      event(s, `Построено: ${IMPROVEMENTS[t.imp].name}`, pid, u.x, u.y);
     }
   }
   // Города
