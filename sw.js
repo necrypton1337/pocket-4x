@@ -1,6 +1,6 @@
 // Офлайн: при первом открытии всё кладём в кэш, дальше играем без сети.
 // При изменении файлов игры поднимайте VERSION, чтобы телефон забрал новую версию.
-const VERSION = 'pocket4x-v11';
+const VERSION = 'pocket4x-v13';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'src/ui/main.js', 'src/ui/render.js', 'src/ui/icons.js',
@@ -17,6 +17,12 @@ self.addEventListener('install', (e) => {
     await c.put('assets/manifest.json', res.clone());
     const man = await res.json();
     await c.addAll(Object.keys(man.sprites).map((n) => `assets/${n}.${man.ext || 'png'}`));
+    try {
+      const ur = await fetch('assets/units/manifest.json');
+      await c.put('assets/units/manifest.json', ur.clone());
+      const um = await ur.json();
+      await c.addAll(Object.keys(um.units).map((n) => `assets/units/${n}.${um.ext || 'webp'}`));
+    } catch { /* без анимированных юнитов */ }
     await self.skipWaiting();
   })());
 });

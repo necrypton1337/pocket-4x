@@ -130,6 +130,19 @@ function float(x, y, text, color) {
   ui.floats.push({ x, y, text, color, born: performance.now() });
 }
 
+// Анимации юнитов: клип по id ('walk', 'shoot', 'hit', 'death') и направление взгляда
+ui.anims = new Map();
+ui.facing = new Map();
+ui.effects = [];
+const RANGED_FX = { archer: 'tracer', crossbow: 'tracer', catapult: 'shell', cannon: 'rail' };
+const now = () => performance.now();
+function anim(id, clip, dur) { ui.anims.set(id, { clip, start: now(), dur }); }
+function effect(kind, x, y, extra = {}) { ui.effects.push({ kind, x, y, born: now(), dur: 300, ...extra }); }
+function face(id, fx, fy, tx, ty) {
+  const [ax] = tileCenter(fx, fy, 10), [bx] = tileCenter(tx, ty, 10);
+  if (bx !== ax) ui.facing.set(id, bx > ax ? 1 : -1);
+}
+
 async function playFx(list, ghosts, own) {
   if (!list.length) return;
   playing = { skip: false };
@@ -142,31 +155,64 @@ async function playFx(list, ghosts, own) {
     if (f.t === 'move') {
       let g = ghosts.get(f.id);
       if (!g) { g = { id: f.id, type: f.type, owner: f.owner, hp: f.hp, x: f.fx, y: f.fy }; ghosts.set(f.id, g); }
+      face(f.id, f.fx, f.fy, f.x, f.y);
       if (live && (own || seen(f.fx, f.fy) || seen(f.x, f.y))) {
         focus(f.x, f.y);
         g.anim = { fx: f.fx, fy: f.fy, tx: f.x, ty: f.y, t: 0 };
-        await tween(own ? 140 : 120, (t) => { g.anim.t = ease(t); });
+        if (!ui.anims.has(f.id) || ui.anims.get(f.id).clip !== 'walk') anim(f.id, 'walk', Infinity);
+        effect('dust', f.fx, f.fy, { oy: 0.05, dur: 350 });
+        await tween(own ? 230 : 190, (t) => { g.anim.t = t; });
         g.anim = null;
       }
       g.x = f.x; g.y = f.y;
+      // если дальше юнит не идёт — снимаем ходьбу
+      const nextMove = list[list.indexOf(f) + 1];
+      if (!nextMove || nextMove.t !== 'move' || nextMove.id !== f.id) ui.anims.delete(f.id);
     } else if (f.t === 'attack') {
       const a = ghosts.get(f.id);
       const d = f.defId != null ? ghosts.get(f.defId) : null;
+      face(f.id, f.ax, f.ay, f.x, f.y);
+      if (d) face(d.id, f.x, f.y, f.ax, f.ay);
       if (live && (own || seen(f.ax, f.ay) || seen(f.x, f.y))) {
         focus(f.x, f.y);
-        if (f.ranged) {
-          const sh = { fx: f.ax, fy: f.ay, tx: f.x, ty: f.y, t: 0 };
+        anim(f.id, 'shoot', 480);
+        const kind = RANGED_FX[f.type] || (f.ranged ? 'tracer' : 'burst');
+        await pause(170);
+        effect('flash', f.ax, f.ay, { ox: 0.12 * (ui.facing.get(f.id) || 1), oy: -0.42, dur: 140 });
+        if (kind === 'shell') {
+          const sh = { fx: f.ax, fy: f.ay, tx: f.x, ty: f.y, t: 0, color: '#ffe08a' };
           ui.shots.push(sh);
-          await tween(300, (t) => { sh.t = t; });
+          await tween(420, (t) => { sh.t = t; });
           ui.shots = ui.shots.filter((x) => x !== sh);
-        } else if (a) {
-          a.anim = { fx: f.ax, fy: f.ay, tx: f.x, ty: f.y, t: 0 };
-          await tween(260, (t) => { a.anim.t = Math.sin(Math.PI * t) * 0.5; });
-          a.anim = null;
+          effect('boom', f.x, f.y, { dur: 650 });
+        } else if (kind === 'rail') {
+          effect('tracer', f.ax, f.ay, { ox: 0, oy: -0.35, x2: f.x, y2: f.y, oy2: -0.3, color: '#9fe8ff', dur: 260 });
+          await pause(120);
+          effect('boom', f.x, f.y, { dur: 600 });
+        } else if (kind === 'tracer') {
+          for (let k = 0; k < 2; k++) {
+            effect('tracer', f.ax, f.ay, { oy: -0.42, x2: f.x, y2: f.y, oy2: -0.38 + k * 0.08, dur: 200 });
+            await pause(90);
+          }
+        } else {
+          // ближний бой: короткий выпад и очередь в упор
+          if (a) {
+            a.anim = { fx: f.ax, fy: f.ay, tx: f.x, ty: f.y, t: 0 };
+            await tween(200, (t) => { a.anim.t = Math.sin(Math.PI * t) * 0.35; });
+            a.anim = null;
+          }
+          effect('tracer', f.ax, f.ay, { oy: -0.42, x2: f.x, y2: f.y, oy2: -0.38, dur: 160 });
         }
+        effect('spark', f.x, f.y, { oy: -0.35, dur: 380 });
+        if (d) anim(d.id, 'hit', 320);
         float(f.x, f.y, `−${f.toDef}`, '#f87171');
-        if (f.toAtk) float(f.ax, f.ay, `−${f.toAtk}`, '#fdba74');
-        await pause(own ? 250 : 320);
+        if (f.toAtk) {
+          await pause(140);
+          effect('tracer', f.x, f.y, { oy: -0.42, x2: f.ax, y2: f.ay, oy2: -0.38, dur: 160 });
+          anim(f.id, 'hit', 320);
+          float(f.ax, f.ay, `−${f.toAtk}`, '#fdba74');
+        }
+        await pause(own ? 260 : 320);
       }
       if (d) d.hp = Math.max(1, d.hp - f.toDef);
       if (a && f.toAtk) a.hp = Math.max(1, a.hp - f.toAtk);
@@ -174,22 +220,25 @@ async function playFx(list, ghosts, own) {
       const g = ghosts.get(f.id);
       if (live && (seen(f.x, f.y) || seen(f.tx, f.ty))) {
         focus(f.tx, f.ty);
+        effect('flash', f.x, f.y, { oy: -0.6, dur: 160 });
         const sh = { fx: f.x, fy: f.y, tx: f.tx, ty: f.ty, t: 0, color: '#fde68a' };
         ui.shots.push(sh);
-        await tween(300, (t) => { sh.t = t; });
+        await tween(320, (t) => { sh.t = t; });
         ui.shots = ui.shots.filter((x) => x !== sh);
+        effect('boom', f.tx, f.ty, { dur: 550 });
+        if (g) anim(g.id, 'hit', 320);
         float(f.tx, f.ty, `−${f.dmg}`, '#f87171');
-        await pause(200);
+        await pause(220);
       }
       if (g) g.hp = Math.max(1, g.hp - f.dmg);
     } else if (f.t === 'remove') {
       const g = ghosts.get(f.id);
       if (g && live && (g.owner === me || seen(g.x, g.y)) && !G.isCivil(g.type)) {
-        float(g.x, g.y, '✕', '#ff8a80');
-        ghosts.delete(f.id);
-        await pause(180);
+        anim(g.id, 'death', 760);
+        await pause(800);
       }
       ghosts.delete(f.id);
+      ui.anims.delete(f.id);
     } else if (f.t === 'owner') {
       const g = ghosts.get(f.id);
       if (g) { g.owner = f.owner; g.type = f.type; }
@@ -197,6 +246,7 @@ async function playFx(list, ghosts, own) {
   }
   ui.ghosts = null;
   ui.shots = null;
+  for (const [id, a] of ui.anims) if (a.clip !== 'walk' || !s.units[id]) ui.anims.delete(id);
   playing = null;
   draw();
 }
@@ -1109,4 +1159,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 
 // для отладки в консоли
 window.__game = () => s;
-window.__ui = { refresh, showGameOver };
+window.__ui = { refresh, showGameOver, withFx, centerOn };

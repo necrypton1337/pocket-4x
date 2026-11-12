@@ -28,8 +28,21 @@ export async function loadSprites(base = 'assets/') {
   } catch {
     spritesReady = false;
   }
+  // Анимированные юниты: ленты кадров
+  try {
+    const um = await (await fetch(base + 'units/manifest.json')).json();
+    await Promise.all(Object.entries(um.units).map(([key, m]) => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => { sheets.set(key, { ...m, img }); resolve(); };
+      img.onerror = resolve;
+      img.src = `${base}units/${key}.${um.ext || 'webp'}`;
+    })));
+  } catch { /* лент нет — рисуем статичные фигурки */ }
   return spritesReady;
 }
+const sheets = new Map();
+export const hasSheet = (type, team) => sheets.has(`${type}_${team}`);
+export function teamKey(s, owner) { return teamOf(s, owner); }
 export const assetsReady = () => spritesReady;
 
 // Производные спрайты (затемнённые для тумана, земля с мягким краем) считаем один раз.
@@ -172,16 +185,54 @@ function hpBar(ctx, x, y, w, frac) {
 
 function drawUnitSprite(ctx, s, u, sx, sy, size, opts) {
   const team = teamOf(s, u.owner);
+  const sheet = sheets.get(`${u.type}_${team}`) || sheets.get(`${u.type}_colonists`);
   const sp = sprites.get(`unit_${u.type}_${team}`) || sprites.get(`unit_${u.type}_colonists`);
   const scale = opts.small ? 0.9 : 1.25;
+  const now = performance.now();
+  const anim = opts.anim;
   if (opts.selected) {
     ctx.strokeStyle = '#ffd84d'; ctx.lineWidth = 2.5;
     ellipse(ctx, sx, sy, size * 0.36 * scale, size * 0.36 * KY * scale); ctx.stroke();
   }
-  if (!drawSprite(ctx, sp, sx, sy, size, scale)) {
+  let alpha = 1;
+  if (anim && anim.clip === 'death') {
+    const p = Math.min(1, (now - anim.start) / anim.dur);
+    if (!sheet || p > 0.8) alpha = sheet ? 1 - (p - 0.8) / 0.2 : 1 - p;
+  }
+  ctx.globalAlpha = Math.max(0, alpha);
+  if (sheet) {
+    let clip = 'idle', fi = 0;
+    if (anim) {
+      const [, count] = sheet.clips[anim.clip] || [0, 0];
+      if (count) {
+        clip = anim.clip;
+        if (anim.clip === 'walk') fi = Math.floor((now - anim.start) / 85) % count;
+        else fi = Math.min(count - 1, Math.floor(((now - anim.start) / anim.dur) * count));
+      }
+    }
+    const [start] = sheet.clips[clip];
+    const k = (size / sheet.px) * (opts.small ? 0.95 : 1.3);
+    // мягкая тень под фигуркой
+    const sh = ctx.createRadialGradient(sx + size * 0.08, sy + size * 0.02, 0, sx + size * 0.08, sy + size * 0.02, size * 0.34);
+    sh.addColorStop(0, 'rgba(0,0,0,0.38)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh;
+    ellipse(ctx, sx + size * 0.08, sy + size * 0.02, size * 0.34, size * 0.34 * KY); ctx.fill();
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.scale(opts.facing || 1, 1);
+    ctx.drawImage(sheet.img, (start + fi) * sheet.w, 0, sheet.w, sheet.h, -sheet.ax * k, -sheet.ay * k, sheet.w * k, sheet.h * k);
+    ctx.restore();
+  } else if (anim && (anim.clip === 'hit' || anim.clip === 'shoot') && sp) {
+    // технике без кадров: отдача при выстреле и дрожь при попадании
+    const p = Math.min(1, (now - anim.start) / anim.dur);
+    const dx = anim.clip === 'hit' ? Math.sin(p * 40) * size * 0.04 * (1 - p) : -(opts.facing || 1) * Math.sin(p * Math.PI) * size * 0.06;
+    drawSprite(ctx, sp, sx + dx, sy, size, scale);
+  } else if (!drawSprite(ctx, sp, sx, sy, size, scale)) {
     ctx.fillStyle = s.players[u.owner].color;
     ellipse(ctx, sx, sy - size * 0.2, size * 0.3, size * 0.3); ctx.fill();
   }
+  ctx.globalAlpha = 1;
+  if (anim && anim.clip === 'death') return;
   const top = sy - size * 0.72 * scale;
   if (u.hp < 100) hpBar(ctx, sx, top, size * 0.5 * scale, u.hp / 100);
   if (opts.ready) {
@@ -435,7 +486,10 @@ export function render(ctx, view, s, me, ui) {
         if (shared) { ox = civ ? -size * 0.38 : size * 0.22; oy = civ ? size * 0.2 : size * 0.28; }
         const isMine = u.owner === me && !ui.ghosts;
         const ready = isMine && u.moves > 0 && !u.fortified && !u.work && !u.goto && !u.auto && u.skipTurn !== s.turn;
-        drawUnitSprite(ctx, s, u, sx + ox, sy + oy * KY, size, { small: civ && shared, selected: u.id === selId, ready, fortified: u.fortified });
+        drawUnitSprite(ctx, s, u, sx + ox, sy + oy * KY, size, {
+          small: civ && shared, selected: u.id === selId, ready, fortified: u.fortified,
+          anim: ui.anims && ui.anims.get(u.id), facing: ui.facing && ui.facing.get(u.id),
+        });
       }
     }
   }
@@ -446,7 +500,10 @@ export function render(ctx, view, s, me, ui) {
     const t = u.anim.t;
     const fi = idx(s, u.anim.fx, u.anim.fy), ti = idx(s, u.anim.tx, u.anim.ty);
     if (u.owner !== me && !vis.has(fi) && !vis.has(ti)) continue;
-    drawUnitSprite(ctx, s, u, ax + (bx - ax) * t, ay + (by - ay) * t, size, { selected: u.id === selId });
+    drawUnitSprite(ctx, s, u, ax + (bx - ax) * t, ay + (by - ay) * t, size, {
+      selected: u.id === selId, anim: (ui.anims && ui.anims.get(u.id)) || { clip: 'walk', start: 0 },
+      facing: ui.facing && ui.facing.get(u.id),
+    });
   }
 
   // 4. Подписи городов, выстрелы, цифры урона
@@ -487,6 +544,58 @@ export function render(ctx, view, s, me, ui) {
       ctx.beginPath(); ctx.arc(px, py, Math.max(3, size * 0.08), 0, Math.PI * 2); ctx.fill();
     }
   }
+  if (ui.effects && ui.effects.length) {
+    ui.effects = ui.effects.filter((e) => now - e.born < e.dur);
+    for (const e of ui.effects) {
+      const p = (now - e.born) / e.dur;
+      const [ex, ey] = toScreen(e.x, e.y);
+      const px = ex + (e.ox || 0) * size, py = ey + (e.oy || 0) * size;
+      if (e.kind === 'tracer') {
+        const [bx, by] = toScreen(e.x2, e.y2);
+        const qx = bx + (e.ox2 || 0) * size, qy = by + (e.oy2 || 0) * size;
+        const head = Math.min(1, p * 1.6), tail = Math.max(0, p * 1.6 - 0.45);
+        ctx.strokeStyle = e.color || '#fff3b0';
+        ctx.lineWidth = Math.max(2, size * 0.05);
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 1 - p * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(px + (qx - px) * tail, py + (qy - py) * tail);
+        ctx.lineTo(px + (qx - px) * head, py + (qy - py) * head);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else if (e.kind === 'flash') {
+        const r = size * 0.16 * (1 - p * 0.5);
+        const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+        g.addColorStop(0, 'rgba(255,255,230,1)'); g.addColorStop(0.4, 'rgba(255,200,80,0.9)'); g.addColorStop(1, 'rgba(255,120,20,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+      } else if (e.kind === 'spark') {
+        ctx.fillStyle = e.color || '#ffd27a';
+        for (let k = 0; k < 7; k++) {
+          const a = (k / 7) * Math.PI * 2 + e.born;
+          const d = size * 0.28 * p;
+          ctx.globalAlpha = 1 - p;
+          ctx.beginPath(); ctx.arc(px + Math.cos(a) * d, py + Math.sin(a) * d * KY - size * 0.15 * p, Math.max(1.5, size * 0.035), 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      } else if (e.kind === 'boom') {
+        const r = size * (0.15 + 0.45 * p);
+        ctx.globalAlpha = 1 - p;
+        const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+        g.addColorStop(0, p < 0.3 ? 'rgba(255,230,150,1)' : 'rgba(120,110,100,0.9)');
+        g.addColorStop(0.6, p < 0.3 ? 'rgba(255,120,30,0.8)' : 'rgba(90,85,80,0.6)');
+        g.addColorStop(1, 'rgba(60,60,60,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.ellipse(px, py - size * 0.25 * p, r, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (e.kind === 'dust') {
+        ctx.globalAlpha = 0.5 * (1 - p);
+        ctx.fillStyle = '#c8b48a';
+        ctx.beginPath(); ctx.ellipse(px, py, size * (0.08 + 0.15 * p), size * (0.05 + 0.08 * p), 0, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
   if (ui.floats) {
     ui.floats = ui.floats.filter((f) => now - f.born < 1100);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -503,7 +612,7 @@ export function render(ctx, view, s, me, ui) {
       ctx.globalAlpha = 1;
     }
   }
-  return !!(ui.floats && ui.floats.length);
+  return !!((ui.floats && ui.floats.length) || (ui.effects && ui.effects.length) || (ui.anims && ui.anims.size));
 }
 
 // Маленькая карта целиком — для окна «Обзор»

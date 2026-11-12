@@ -194,6 +194,10 @@ def cube(loc, size, m, rot=(0, 0, 0)):
     bpy.ops.mesh.primitive_cube_add(size=1, location=loc, rotation=rot)
     o = bpy.context.active_object
     o.scale = size
+    bev = o.modifiers.new('bev', 'BEVEL')
+    bev.width = min(size) * 0.15
+    bev.segments = 2
+    bev.limit_method = 'NONE'
     return apply(o, m)
 
 
@@ -638,6 +642,8 @@ def vehicle(kind, prim, acc, glow):
             cyl((x, 0.04, 0.22), 0.008, 0.14, D, verts=6)
         cube((0, 0.04, 0.29), (0.15, 0.012, 0.012), D)
     elif kind == 'hovertank':
+        for x in (-0.13, 0.13):
+            cube((x, 0.16, 0.2), (0.05, 0.08, 0.03), D)
         o = cube((0, 0, 0.12), (0.3, 0.44, 0.1), P)
         cube((0, -0.02, 0.2), (0.24, 0.3, 0.05), A)
         cyl((0, 0.02, 0.26), 0.09, 0.07, P, verts=12)
@@ -649,6 +655,10 @@ def vehicle(kind, prim, acc, glow):
         cube((0.0, 0.08, 0.06), (0.1, 0.06, 0.08), A)
         figure(prim, acc, glow, x=0.14, y=0.06, s=0.7, helmet='round', weapon=None)
     elif kind == 'railgun':
+        for x in (-0.14, 0.14):
+            cube((x, 0.02, 0.05), (0.07, 0.38, 0.08), D)
+            for j in range(5):
+                cyl((x, -0.14 + j * 0.07, 0.05), 0.03, 0.075, mat('wh', srgb('#3a3d44'), 0.6), verts=10, rot=(0, 1.5708, 0))
         cube((0, 0.02, 0.07), (0.26, 0.34, 0.08), D)
         cube((0, 0.02, 0.14), (0.2, 0.26, 0.06), P)
         for x in (-0.035, 0.035):
